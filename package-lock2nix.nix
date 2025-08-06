@@ -537,7 +537,7 @@ let
             path: lib.mergeAttrs { hierarchy = lib.splitString "/" path; }
           ) filtered;
           # Don’t use lib.fileset because we want to allow IFD
-          src = lib.sources.trace (lib.sourceByRegex root [ "^package(-lock)?\.json$" ]);
+          src = lib.sourceByRegex root [ "^package(-lock)?\.json$" ];
         }
       );
 
