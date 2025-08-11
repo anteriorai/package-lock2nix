@@ -98,7 +98,7 @@ let
           # this script is when accidentally run in the wrong location during dev
           # or debugging.
           ''
-            if [[ "$PWD" != /tmp/* && "$PWD" != /private/tmp/* && "$PWD" != /var/* && "$PWD" != /build/* ]]; then
+            if [[ "$PWD" != /tmp/* && "$PWD" != /private/tmp/* && "$PWD" != /var/* && "$PWD" != /build/* && "$PWD" != /nix/var/nix/builds/* ]]; then
               >&2 cat <<EOF
             Dangerous script 'unsymlinkify' running in unexpected build directory
             $PWD, refusing to continue.  Edit the whitelist in package-lock2nix
