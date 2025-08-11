@@ -1,0 +1,22 @@
+name: CI
+
+on:
+  push:
+
+jobs:
+  nix-flake-health:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: cachix/install-nix-action@v31
+      - uses: actions/checkout@v4
+      - run: nix flake show
+      - run: nix flake lock --no-update-lock-file
+      - run: nix flake check --no-build
+
+  nix-flake-check:
+    timeout-minutes: 30
+    runs-on: ubuntu-latest
+    steps:
+      - uses: cachix/install-nix-action@v31
+      - uses: actions/checkout@v4
+      - run: nix flake check -L --keep-going
