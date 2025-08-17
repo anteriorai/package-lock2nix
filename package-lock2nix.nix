@@ -243,7 +243,8 @@ let
       # packages :: { String : LinkSpec | FetchSpec }
       mkNodeModules' =
         {
-          src,
+          # Used only for linked (local) dependencies
+          root,
           name,
           packages,
           srcOverrides,
@@ -254,7 +255,7 @@ let
             (
               if (p.link or false) then
                 scopeSelf.mkNpmModule {
-                  src = src + ("/" + p.resolved);
+                  src = root + ("/" + p.resolved);
                   npmOverrides = srcOverrides;
                   # This breaks for some reason?
                   # includeNodeModules = false;
@@ -545,12 +546,10 @@ let
           # same package-lock.  These can get heavy (easily >1GiB) so this is worth
           # it.
           inherit (packageLock) name;
-          inherit srcOverrides;
+          inherit root srcOverrides;
           packages = builtins.mapAttrs (
             path: lib.mergeAttrs { hierarchy = lib.splitString "/" path; }
           ) filtered;
-          # Don’t use lib.fileset because we want to allow IFD
-          src = lib.sourceByRegex root [ "^package(-lock)?\.json$" ];
         }
       );
 
@@ -744,10 +743,10 @@ let
           );
           includedWorkspaces = lib.unique workspaceDependencies.${workspace};
           nodeModules = mkNodeModules' {
-            inherit src;
             inherit (packageLock) name;
-            packages = lib.getAttrs allMyDependencies packages;
             inherit srcOverrides;
+            root = src;
+            packages = lib.getAttrs allMyDependencies packages;
           };
         in
         nodeModules.overrideAttrs (
