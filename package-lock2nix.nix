@@ -940,8 +940,9 @@ let
                         done
                       '';
                     };
+                  isNodeJs = drv: (drv.pname or "") == "nodejs";
                   buildInputs' = lib.concatMap (
-                    drv: lib.optionals (drv.pname == "nodejs") [ (symlinkSafeNpmNpx drv) ] ++ [ drv ]
+                    drv: lib.optionals (isNodeJs drv) [ (symlinkSafeNpmNpx drv) ] ++ [ drv ]
                   ) (self.buildInputs or [ ]);
                   PATH = lib.concatStringsSep ":" ([
                     "$out/node_modules/.bin"
