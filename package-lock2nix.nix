@@ -263,6 +263,7 @@ let
               if (p.link or false) then
                 scopeSelf.mkNpmModule {
                   src = src + ("/" + p.resolved);
+                  npmOverrides = srcOverrides;
                   # This breaks for some reason?
                   # includeNodeModules = false;
                 }
