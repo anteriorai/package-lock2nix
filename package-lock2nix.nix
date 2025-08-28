@@ -179,43 +179,34 @@ let
         in
         if builtins.typeOf bins == "string" then { ${packageJson.name} = bins; } else bins;
 
-      # Unpack a single NPM dependency tarball.
+      # Unpack a single NPM dependency tarball.  This is a prime target for
+      # overriding through an overlay, so honor stdenv expectations: idiomatic
+      # phases, post* and pre* hooks, ...
       mkNodeSingleDep = lib.makeOverridable (
         {
           name,
           src,
           version,
-          extraDirs ? { },
-          stdenv ? stdenvNoCC,
         }:
         stdenv.mkDerivation (self: {
           inherit name src version;
           # The plan9 tar is more robust against poorly crafted archives.  Otherwise
           # you get this:
           # https://discourse.nixos.org/t/unpack-phase-permission-denied/13382/4
-          preUnpack = ''
+          plan9UnpackPhase = ''
             unpackFile() {
               ${plan9port}/plan9/bin/tar xf "$1"
               rm -rf PaxHeader
             }
           '';
+          prePhases = [ "plan9UnpackPhase" ];
+          # Don’t build by default to prevent stdenv picking up a dependency’s
+          # makefile and start building.  That has to be opt-in.
+          dontBuild = true;
           nativeBuildInputs = [ jq ];
           # Many launcher scripts use the #!/usr/bin/env node shebang which is best
           # pinned at fixup time of this derivation to a specific nodejs version.
           buildInputs = [ nodejs ];
-          buildPhase = ''
-            runHook preBuild
-
-          ''
-          + lib.concatStringsSep "\n" (
-            lib.mapAttrsToList (name: path: ''
-              ln -s ${path} ${lib.escapeShellArg name}
-            '') extraDirs
-          )
-          + ''
-
-            runHook postBuild
-          '';
           installPhase = ''
             runHook preInstall
 
@@ -226,12 +217,13 @@ let
           # You cannot trust the permissions in the tar file so it’s better to force
           # everything to 644 and only set the executable bit on directories and files
           # which we know explicitly to be listed as executables.
-          preFixup = ''
+          forcePermissionsPhase = ''
             <"$out/package.json" jq -r '(.name as $name | .bin | if type == "object" then (to_entries | .[].value) else . end) // empty' | while read path; do
               chmod +x $out/$path
               patchShebangs $out/$path
             done
           '';
+          preFixupPhases = [ "forcePermissionsPhase" ];
         })
       );
 
@@ -251,7 +243,8 @@ let
       # packages :: { String : LinkSpec | FetchSpec }
       mkNodeModules' =
         {
-          src,
+          # Used only for linked (local) dependencies
+          root,
           name,
           packages,
           srcOverrides,
@@ -262,7 +255,7 @@ let
             (
               if (p.link or false) then
                 scopeSelf.mkNpmModule {
-                  src = src + ("/" + p.resolved);
+                  src = root + ("/" + p.resolved);
                   npmOverrides = srcOverrides;
                   # This breaks for some reason?
                   # includeNodeModules = false;
@@ -456,8 +449,28 @@ let
                 );
               };
               output =
-                if a ? "." then
-                  a.${"."}.override { extraDirs = builtins.removeAttrs recursed [ "." ]; }
+                if (builtins.attrNames a == [ "." ]) then
+                  # a is just a single leaf dependency. Include it directly.
+                  a."."
+                else if a ? "." then
+                  # a is a collection of dependencies with at least the "."
+                  # path, which is the foldl’s base case to indicate "the
+                  # current directory".  That means the output must be a
+                  # derivation with those files in the current directory.  If a
+                  # also has other entries, which aren’t "." but “real paths”,
+                  # those should be included.
+                  let
+                    nestedDependencies = builtins.removeAttrs recursed [ "." ];
+                  in
+                  a.".".overrideAttrs (old: {
+                    linkNestedDependenciesPhase = lib.concatStringsSep "\n" (
+                      lib.mapAttrsToList (name: path: ''
+                        ln -s ${path} ${lib.escapeShellArg name}
+                      '') nestedDependencies
+                    );
+                    # This must happen before (potential) building
+                    preConfigurePhases = old.preConfigurePhases or [ ] ++ [ "linkNestedDependenciesPhase" ];
+                  })
                 else
                   combined;
             in
@@ -533,12 +546,10 @@ let
           # same package-lock.  These can get heavy (easily >1GiB) so this is worth
           # it.
           inherit (packageLock) name;
-          inherit srcOverrides;
+          inherit root srcOverrides;
           packages = builtins.mapAttrs (
             path: lib.mergeAttrs { hierarchy = lib.splitString "/" path; }
           ) filtered;
-          # Don’t use lib.fileset because we want to allow IFD
-          src = lib.sourceByRegex root [ "^package(-lock)?\.json$" ];
         }
       );
 
@@ -732,10 +743,10 @@ let
           );
           includedWorkspaces = lib.unique workspaceDependencies.${workspace};
           nodeModules = mkNodeModules' {
-            inherit src;
             inherit (packageLock) name;
-            packages = lib.getAttrs allMyDependencies packages;
             inherit srcOverrides;
+            root = src;
+            packages = lib.getAttrs allMyDependencies packages;
           };
         in
         nodeModules.overrideAttrs (
