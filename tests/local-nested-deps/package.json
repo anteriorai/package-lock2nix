@@ -1,11 +1,12 @@
 {
-  "name": "local-dependency",
+  "name": "local-nested-deps",
   "type": "module",
   "scripts": {
     "build": "echo nothing to build",
-    "test": "echo nothing to test"
+    "test": "node --test '**/*.test.js'"
   },
   "dependencies": {
+    "local-dependency": "file:../local-dependency",
     "single-no-deps": "file:../single-no-deps"
   },
   "exports": {
