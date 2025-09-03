@@ -29,12 +29,7 @@
           perSystem =
             { system, ... }:
             {
-              treefmt = {
-                programs.nixfmt = {
-                  enable = true;
-                  strict = true;
-                };
-              };
+              treefmt = import ./nix/treefmt.nix;
             };
         };
     in
