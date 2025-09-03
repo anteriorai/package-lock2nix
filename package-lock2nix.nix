@@ -48,6 +48,7 @@
   stdenvNoCC,
   writeShellApplication,
   writeShellScript,
+  writeScript,
   writeTextFile,
   writeText,
 
@@ -249,13 +250,14 @@ let
       # LinkSpec = { link : Boolean; resolved : String; }
       # FetchSpec = { resolved: String; integrity : String; hierarchy: [ String ] }
       # packages :: { String : LinkSpec | FetchSpec }
-      mkNodeModules' =
+      mkNodeModules'' =
         {
           src,
           name,
           packages,
           srcOverrides,
         }:
+        assert lib.assertMsg (packages != { }) "Cannot make node_modules for empty packages";
         let
           sourcesFlatRaw = builtins.mapAttrs (
             name: p:
@@ -493,6 +495,40 @@ let
             fi
           '';
         };
+
+      mkNodeModules' =
+        { packages, ... }@args:
+        if
+          packages == { }
+        # Hack to support package-lock without any dependencies.
+        # Technically this is “too late”: real npm on a
+        # package-lock.json without any dependencies doesn’t even create
+        # a node_modules directory at all.  To emulate that, upstream
+        # users of this function should be able to handle a missing
+        # node_modules directory.
+        then
+          runCommand "empty-node_modules"
+            {
+              # nodeModules derivations have an ad-hoc collection of helper
+              # scripts defined in passthru.  Again, a better way to do this is to
+              # just support missing node_modules directories in the caller, but
+              # for now this works.
+              passthru =
+                let
+                  nop = writeScript "nop" "true";
+                in
+                {
+                  cleanupLinks = nop;
+                  createLinks = nop;
+                  mergeInto = nop;
+                };
+            }
+            ''
+              mkdir -p $out/node_modules
+            ''
+        else
+          mkNodeModules'' args;
+
     in
     {
       # Create a non-workspace node_modules folder from a package-lock.json file in
