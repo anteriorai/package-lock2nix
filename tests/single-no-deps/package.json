@@ -1,0 +1,11 @@
+{
+  "name": "single-no-deps",
+  "type": "module",
+  "scripts": {
+    "build": "echo nothing to build",
+    "test": "node --test '**/*.test.js'"
+  },
+  "exports": {
+    "./foo": "./foo.js"
+  }
+}
