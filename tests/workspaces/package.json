@@ -1,0 +1,10 @@
+{
+  "name": "workspaces-test",
+  "workspaces": [
+    "mybencode",
+    "final"
+  ],
+  "dependencies": {
+    "bencode": "^4.0.0"
+  }
+}

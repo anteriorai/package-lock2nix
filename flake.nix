@@ -11,6 +11,7 @@
     # Ok technically this is used for .lib. :) but I assume you can override
     # this, too.
     flake-parts.url = "flake-parts";
+    globset.url = "github:pdtpartners/globset";
   };
   outputs =
     {
@@ -18,6 +19,7 @@
       systems,
       flake-parts,
       nixpkgs,
+      globset,
       ...
     }@inputs:
     let
@@ -38,12 +40,37 @@
               treefmt = import ./nix/treefmt.nix;
               checks =
                 let
-                  package-lock2nix = pkgs.callPackage self.lib.package-lock2nix { };
+                  package-lock2nix = pkgs.callPackage self.lib.package-lock2nix { inherit globset; };
+                  nested = lib.packagesFromDirectoryRecursive {
+                    callPackage = lib.callPackageWith (pkgs // { inherit package-lock2nix; });
+                    directory = ./tests;
+                  };
+                  notDeriv = x: !(lib.isDerivation x);
+                  # flatten
+                  #   (lib.concatStringsSep "/")
+                  #   builtins.isAttrs
+                  #   { a = { b = 3; c = "foo"; } ; d = 1234; }
+                  #
+                  # => { "a/b" = 3; "a/c" = "foo"; d = 1234; }
+                  flatten =
+                    namef: while: a:
+                    let
+                      recurse =
+                        ancestry:
+                        lib.foldlAttrs (
+                          acc: name: value:
+                          let
+                            hierarchy = ancestry ++ [ name ];
+                            subflat =
+                              if while value then recurse hierarchy value else [ (lib.nameValuePair (namef hierarchy) value) ];
+                          in
+                          subflat ++ acc
+                        ) [ ];
+                    in
+                    builtins.listToAttrs (recurse [ ] a);
+                  slashflat = flatten (lib.concatStringsSep "/") notDeriv nested;
                 in
-                lib.packagesFromDirectoryRecursive {
-                  callPackage = lib.callPackageWith (pkgs // { inherit package-lock2nix; });
-                  directory = ./tests;
-                };
+                slashflat;
             };
         };
     in
