@@ -431,19 +431,25 @@ let
                       n: v:
                       let
                         base = lib.escapeShellArg (builtins.baseNameOf n);
+                        isMergable = v ? mergeInto;
                       in
-                      (
-                        # Insane magic but the problem is I can’t do this in pure
-                        # bash because if there is no ‘v.mergeInto’ property, then I
-                        # can’t even _generate_ the bash ‘then-clause’, even if the
-                        # actual bash if-statement would somehow ignore it.
-                        lib.optionalString (v ? mergeInto) ''
-                          [[ -d "$1/"${base} ]] &&
-                          ${v.mergeInto} "$1/"${base} || ''
-                        # If this isn’t a merge-into script then just link it, no
-                        # matter what.
-                        + ''ln -s ${v} "$1/"${lib.escapeShellArg n}''
-                      )
+                      # Insane magic but the problem is I can’t do this in pure
+                      # bash because if there is no ‘v.mergeInto’ property, then I
+                      # can’t even _generate_ the bash ‘then-clause’, even if the
+                      # actual bash if-statement would somehow ignore it.
+                      lib.optionalString (isMergable) ''
+                        if [[ -d "$1/"${base} ]]; then
+                          ${v.mergeInto} "$1/"${base}
+                        else
+                      ''
+                      # If this isn’t a merge-into script then just link it, no
+                      # matter what.
+                      + ''
+                        ln -s ${v} "$1/"${lib.escapeShellArg n}
+                      ''
+                      + lib.optionalString (isMergable) ''
+                        fi
+                      ''
                     ) recursed)
                   )
                 );
