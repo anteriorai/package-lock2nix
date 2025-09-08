@@ -8,5 +8,8 @@
   "dependencies": {
     "bencode": "^4.0.0"
   },
-  "bin": "./index.js"
+  "bin": "./index.js",
+  "exports": {
+    "./mybencode": "./mybencode.js"
+  }
 }
