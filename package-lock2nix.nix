@@ -259,8 +259,6 @@ let
                 scopeSelf.mkNpmModule {
                   src = root + ("/" + p.resolved);
                   npmOverrides = srcOverrides;
-                  # This breaks for some reason?
-                  # includeNodeModules = false;
                 }
               else
                 mkNodeSingleDep {
@@ -900,9 +898,6 @@ let
                 # DO WHAT YOU CAN TO AVOID USING THIS!  It is a massive crutch.
                 unsymlinkify
               ];
-              # Honestly we’re not entirely sure whether this is the right way to do it or
-              # not.  When would you want this?  When not?  I think we get it but do we?
-              includeNodeModules = true;
               distDir = "."; # TODO: this feels weird--how do we want to do this?
               NODE_PRESERVE_SYMLINKS = 1;
               # npm will ensure the final binaries are executable for you, though at a
@@ -937,9 +932,7 @@ let
                 if [[ -d $distDir ]]; then
                   cp -r $distDir $out/
                 fi
-                if [[ "$includeNodeModules" == "1" ]]; then
-                  ln -s $nodeModules/node_modules $out/
-                fi
+                ln -s $nodeModules/node_modules $out/
 
                 runHook postInstall
               '';
