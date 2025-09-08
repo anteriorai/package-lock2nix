@@ -898,7 +898,6 @@ let
                 # DO WHAT YOU CAN TO AVOID USING THIS!  It is a massive crutch.
                 unsymlinkify
               ];
-              distDir = "."; # TODO: this feels weird--how do we want to do this?
               NODE_PRESERVE_SYMLINKS = 1;
               # npm will ensure the final binaries are executable for you, though at a
               # weird moment: not when you build the original package, but when someone
@@ -929,9 +928,7 @@ let
 
                 rm node_modules
                 mkdir -p $out
-                if [[ -d $distDir ]]; then
-                  cp -r $distDir $out/
-                fi
+                cp -r . $out/
                 ln -s $nodeModules/node_modules $out/
 
                 runHook postInstall
