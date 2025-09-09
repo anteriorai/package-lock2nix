@@ -1,0 +1,13 @@
+{
+  "name": "@example/final",
+  "version": "0.0.0",
+  "type": "module",
+  "scripts": {
+    "build": "echo no build step",
+    "test": "node --test"
+  },
+  "dependencies": {
+    "@example/mybencode": "0.0.0",
+    "bencode": "^3.1.1"
+  }
+}

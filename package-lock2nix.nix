@@ -1033,7 +1033,7 @@ let
           nodeModules = scopeSelf.mkWorkspaceNodeModules ({
             inherit root workspace packageLock;
             installDev = true; # see non-workspace nodeModule for why this is hard
-            srcOverrides = args.npmOverrides;
+            srcOverrides = npmOverrides;
           });
           orig = scopeSelf.mkNpmModule (
             {
