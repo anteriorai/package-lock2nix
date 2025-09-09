@@ -495,18 +495,22 @@ let
                   # derivation with those files in the current directory.  If a
                   # also has other entries, which aren’t "." but “real paths”,
                   # those should be included.
-                  let
-                    nestedDependencies = builtins.removeAttrs recursed [ "." ];
-                  in
-                  a.".".overrideAttrs (old: {
-                    linkNestedDependenciesPhase = lib.concatStringsSep "\n" (
-                      lib.mapAttrsToList (name: path: ''
-                        ln -s ${path} ${lib.escapeShellArg name}
-                      '') nestedDependencies
-                    );
-                    # This must happen before (potential) building
-                    preConfigurePhases = old.preConfigurePhases or [ ] ++ [ "linkNestedDependenciesPhase" ];
-                  })
+                  a.".".overrideAttrs (
+                    old:
+                    let
+                      nestedDependencies = mkMergeable {
+                        name = "${old.name}-nested";
+                        contents = builtins.removeAttrs recursed [ "." ];
+                      };
+                    in
+                    {
+                      mergeNestedDependenciesPhase = ''
+                        ${nestedDependencies.mergeInto} "$PWD"
+                      '';
+                      # This must happen before (potential) building
+                      preConfigurePhases = old.preConfigurePhases or [ ] ++ [ "mergeNestedDependenciesPhase" ];
+                    }
+                  )
                 else
                   combined;
             in
