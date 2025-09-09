@@ -521,7 +521,6 @@ let
         in
         nodeModules.overrideAttrs {
           nativeBuildInputs = [ makeWrapper ];
-          npmDontMakeBin = true;
           # Binaries left in node_modules/.bin by npm expect:
           #
           # - to be able to load from JS any module from the parent node_modules
@@ -531,7 +530,7 @@ let
           # (I think.  At least it seemed like it.  These now definitely can do that.)
           fixupPhase = ''
             nmbin=$out/node_modules/.bin
-            if [[ -d $nmbin && -z "''${npmDontMakeBin-}" ]]; then
+            if [[ -d $nmbin ]]; then
               (
                 cd $nmbin
                 for f in * ; do
