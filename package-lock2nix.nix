@@ -480,6 +480,9 @@ let
                 '';
                 # Useful for debugging individual dependencies using nix develop.
                 passthru.packages = sourcesFlat;
+                # Is this the right place to put this?  It’s not very clean.
+                passthru.cleanupLinks = "true";
+                passthru.createLinks = "true";
               };
               output =
                 if (builtins.attrNames a == [ "." ]) then
@@ -551,21 +554,15 @@ let
         # users of this function should be able to handle a missing
         # node_modules directory.
         then
-          runCommand "empty-node_modules"
-            {
-              # nodeModules derivations have an ad-hoc collection of helper
-              # scripts defined in passthru.  Again, a better way to do this is to
-              # just support missing node_modules directories in the caller, but
-              # for now this works.
-              passthru = {
-                cleanupLinks = "true";
-                createLinks = "true";
-                mergeInto = "true";
-              };
-            }
-            ''
-              mkdir -p $out/node_modules
-            ''
+          # nodeModules derivations are a collection of helper
+          # scripts defined in passthru.  Again, a better way to do this is to
+          # just support missing node_modules directories in the caller, but
+          # for now this works.
+          {
+            cleanupLinks = "true";
+            createLinks = "true";
+            mergeInto = "true";
+          }
         else
           mkNodeModules'' args;
 
@@ -811,48 +808,42 @@ let
             root = src;
             packages = lib.getAttrs allMyDependencies packages;
           };
+          links = (
+            builtins.filter (x: x != null) (
+              lib.mapAttrsToList (
+                dir: spec:
+                let
+                  linkToActiveWorkspace =
+                    (spec.link or false) && builtins.elem (spec.resolved or "") includedWorkspaces;
+                in
+                if linkToActiveWorkspace then
+                  {
+                    source = spec.resolved;
+                    target = dir;
+                  }
+                else
+                  null
+              ) packages
+            )
+          );
         in
-        nodeModules.overrideAttrs (
-          old:
-          let
-            links = (
-              builtins.filter (x: x != null) (
-                lib.mapAttrsToList (
-                  dir: spec:
-                  let
-                    linkToActiveWorkspace =
-                      (spec.link or false) && builtins.elem (spec.resolved or "") includedWorkspaces;
-                  in
-                  if linkToActiveWorkspace then
-                    {
-                      source = spec.resolved;
-                      target = dir;
-                    }
-                  else
-                    null
-                ) packages
-              )
-            );
-          in
-          {
-            passthru = old.passthru or { } // {
-              # most of this is just for debugging
-              inherit
-                allWorkspaces
-                includedWorkspaces
-                packageLock
-                allMyDependencies
-                ;
-              excludedWorkspaces = lib.subtractLists includedWorkspaces (builtins.attrValues allWorkspaces);
-              # A stand-alone script to create symlinks to linked entries (other
-              # workspaces hopefully)
-              createLinks = createDeepLinks links;
-              # Remove all symlinks created by the createLinks script from the working
-              # directory.
-              cleanupLinks = rmFilesAndCleanupDirs (map ({ source, target }: target) links);
-            };
-          }
-        )
+        nodeModules
+        // {
+          # most of this is just for debugging
+          inherit
+            allWorkspaces
+            includedWorkspaces
+            packageLock
+            allMyDependencies
+            ;
+          excludedWorkspaces = lib.subtractLists includedWorkspaces (builtins.attrValues allWorkspaces);
+          # A stand-alone script to create symlinks to linked entries (other
+          # workspaces hopefully)
+          createLinks = createDeepLinks links;
+          # Remove all symlinks created by the createLinks script from the working
+          # directory.
+          cleanupLinks = rmFilesAndCleanupDirs (map ({ source, target }: target) links);
+        }
       );
 
       # Build an NPM package from a package-lock.json which is expected to place its
@@ -869,34 +860,11 @@ let
           final = stdenv.mkDerivation (
             self:
             let
+              inherit (self.passthru) nodeModules;
               packageJson = builtins.fromJSON (builtins.readFile (src + "/package.json"));
             in
             {
               inherit (packageLock) name;
-              nodeModules = scopeSelf.mkNodeModules {
-                inherit packageLock;
-                root = src;
-                # This whole time I thought it would be worth it to create a
-                # separate node_modules for dev and non-dev; build the app with dev,
-                # then swap in the non-dev on install.  Turns out no project of any
-                # complexity is compatible with this: they keep references to the
-                # dev node_modules around, defeating treeshaking, and you end up
-                # with almost _double_ the dependencies rather than fewer.  I guess
-                # the normal way to do this is to build with devDependencies, then
-                # on install _remove_ all dev-only dependencies from node_modules?
-                # Of course that cannot work in Nix.  This should be solved more
-                # properly, but for now let’s just pretend in the rest of the file
-                # that anyone still want separate prod and dev nodeModules.
-                installDev = true;
-                srcOverrides = npmOverrides;
-              };
-              devNodeModules = self.nodeModules.override { installDev = true; };
-              # Start with dev modules regardless because they are usually required
-              # for building
-              patchPhase = ''
-                runHook prePatch
-
-              ''
               # Technically these are pretty much default, but when a script gets
               # launched directly from one of the symlinked dependencies
               # (e.g. jest), it won’t "know" where it "came from" because by default
@@ -919,8 +887,11 @@ let
               # - This is more like a "real" build because a "real" build also just
               #   expects your NODE_PATH to basically be <build_dir>/node_modules
               #   (which it is by default, just not symlink aware).
-              + ''
-                ln -s $devNodeModules/node_modules
+              patchPhase = ''
+                runHook prePatch
+
+                ${nodeModules.createLinks} "$PWD"
+                ${nodeModules.mergeInto} "$PWD"
                 addToSearchPath PATH "$PWD/node_modules/.bin"
 
                 runHook postPatch
@@ -959,10 +930,10 @@ let
               installPhase = ''
                 runHook preInstall
 
-                rm node_modules
+                ${nodeModules.cleanupLinks} "$PWD"
                 mkdir -p $out
-                cp -r . $out/
-                ln -s $nodeModules/node_modules $out/
+                cp -r . $out
+                ${nodeModules.createLinks} "$out"
 
                 runHook postInstall
               '';
@@ -1045,6 +1016,23 @@ let
               preFixupPhases = (args.preFixupPhases or [ ]) ++ [ "fixupNpmBinaries" ];
 
               passthru = {
+                nodeModules = scopeSelf.mkNodeModules {
+                  inherit packageLock;
+                  root = src;
+                  # This whole time I thought it would be worth it to create a
+                  # separate node_modules for dev and non-dev; build the app with dev,
+                  # then swap in the non-dev on install.  Turns out no project of any
+                  # complexity is compatible with this: they keep references to the
+                  # dev node_modules around, defeating treeshaking, and you end up
+                  # with almost _double_ the dependencies rather than fewer.  I guess
+                  # the normal way to do this is to build with devDependencies, then
+                  # on install _remove_ all dev-only dependencies from node_modules?
+                  # Of course that cannot work in Nix.  This should be solved more
+                  # properly, but for now let’s just pretend in the rest of the file
+                  # that anyone still want separate prod and dev nodeModules.
+                  installDev = true;
+                  srcOverrides = npmOverrides;
+                };
                 inherit packageLock;
                 outBins = outBins packageJson;
               }
@@ -1114,22 +1102,12 @@ let
             ])
           );
           final = orig.overrideAttrs (self: {
-            inherit nodeModules;
-            devNodeModules = nodeModules;
             passthru = (self.passthru or { }) // {
+              inherit nodeModules;
               outBins = builtins.mapAttrs (_: bin: "${workspace}/${bin}") (
                 outBins (builtins.fromJSON (builtins.readFile (root + "/${workspace}/package.json")))
               );
             };
-            patchPhase = ''
-              runHook prePatch
-
-              ${nodeModules.createLinks} "$PWD"
-              ${nodeModules.mergeInto} "$PWD"
-              addToSearchPath PATH "$PWD/node_modules/.bin"
-
-              runHook postPatch
-            '';
             buildPhase = ''
               runHook preBuild
 
@@ -1149,16 +1127,6 @@ let
               done
 
               runHook postCheck
-            '';
-            installPhase = ''
-              runHook preInstall
-
-              ${nodeModules.cleanupLinks} "$PWD"
-              mkdir -p $out
-              cp -r . $out
-              ${nodeModules.createLinks} "$out"
-
-              runHook postInstall
             '';
           });
         in
