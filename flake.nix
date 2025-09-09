@@ -14,6 +14,7 @@
   };
   outputs =
     {
+      self,
       systems,
       flake-parts,
       nixpkgs,
@@ -27,14 +28,22 @@
             lib.package-lock2nix = import ./package-lock2nix.nix;
           };
           perSystem =
-            { system, ... }:
             {
-              treefmt = {
-                programs.nixfmt = {
-                  enable = true;
-                  strict = true;
+              pkgs,
+              lib,
+              system,
+              ...
+            }:
+            {
+              treefmt = import ./nix/treefmt.nix;
+              checks =
+                let
+                  package-lock2nix = pkgs.callPackage self.lib.package-lock2nix { };
+                in
+                lib.packagesFromDirectoryRecursive {
+                  callPackage = lib.callPackageWith (pkgs // { inherit package-lock2nix; });
+                  directory = ./tests;
                 };
-              };
             };
         };
     in

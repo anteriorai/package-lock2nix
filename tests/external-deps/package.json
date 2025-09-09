@@ -1,0 +1,15 @@
+{
+  "name": "external-deps",
+  "type": "module",
+  "scripts": {
+    "build": "echo nothing to build",
+    "test": "node --test"
+  },
+  "dependencies": {
+    "bencode": "^4.0.0"
+  },
+  "bin": "./index.js",
+  "exports": {
+    "./mybencode": "./mybencode.js"
+  }
+}
