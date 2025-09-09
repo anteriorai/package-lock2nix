@@ -67,50 +67,6 @@ let
   scope = lib.makeScope newScope (
     scopeSelf:
     let
-      # horrific script which should never be used: recursively replace every
-      # absolute symlink in this directory by a copy of its target.  Obviously
-      # _extremely_ dangerous, particularly in a devShell (which is why it’s not
-      # exposed in nativeBuildInputs).
-      unsymlinkify = writeShellApplication {
-        name = "unsymlinkify";
-        meta.description = "In given directory recursively replace each symlink with its target";
-        runtimeInputs = [ findutils ];
-        text =
-          let
-            replaceSymlink = writeShellScript "replace_symlink" ''
-              set -euo pipefail
-              target="$(readlink -f "$1")"
-              # Only interested in directories (we're hacking
-              # non-preserveSymlinks-conforming software)
-              if [[ -d "$target" ]]; then
-                rm -f "$1"
-                cp --no-preserve=ownership -r "$target" "$1"
-                # We _do_ want to preserve the executable bit
-                chmod -R u+w "$1"
-              elif [[ ! -f "$target" ]]; then
-                >&2 echo "No target file found at $target for link $1"
-                exit 1
-              fi
-            '';
-          in
-          # White-listed possible build directories just because of how dangerous
-          # this script is when accidentally run in the wrong location during dev
-          # or debugging.
-          ''
-            if [[ "$PWD" != /tmp/* && "$PWD" != /private/tmp/* && "$PWD" != /var/* && "$PWD" != /build/* && "$PWD" != /nix/var/nix/builds/* ]]; then
-              >&2 cat <<EOF
-            Dangerous script 'unsymlinkify' running in unexpected build directory
-            $PWD, refusing to continue.  Edit the whitelist in package-lock2nix
-            source to circumvent this.
-            EOF
-              exit 1
-            fi
-            find "$1" -mindepth 1 -maxdepth 1 -type l -lname '/*' -exec ${replaceSymlink} {} \;
-            me="''${BASH_SOURCE[0]}"
-            find "$1" -mindepth 1 -maxdepth 1 -type d -exec "$me" {} \;
-          '';
-      };
-
       # createDeepLinks SOURCE_ROOT TARGET_ROOT
       #
       # links :: [ { source : str; target : str; } ]
@@ -169,6 +125,20 @@ let
           ) files
         );
 
+      # This is a safe but painful default.  Node really hates symlinks and
+      # fights you every step of the way
+      # (e.g. "https://github.com/nodejs/node/issues/19383").  Having a plain
+      # node_modules directory with every dependency as real directories in
+      # there is much less susceptible to obscure bugs and edge cases.  The cost
+      # is copying of all these dependencies every time you build a new
+      # derivation, even if none of the dependencies changed: they must be
+      # copied into the final derivation rather than linked.  If this cost
+      # becomes too high, you can use ‘ln -s’ here, but there is a huge cost in
+      # complexity you’ll have to wrangle, including envvars
+      # NODE_PRESERVE_SYMLINKS and NODE_PRESERVE_SYMLINKS_MAIN.  In the git
+      # history of this project is a version which does this, including a tool
+      # ‘unsymlinkify’ to transform a hierarchy of symlinks to a plain hierarchy
+      # of files and directories at runtime.  Caveat emptor.
       defaultCopyCommand = "cp -r";
 
       # Turn an attrset of derivations into a directory containing their
@@ -867,8 +837,6 @@ let
               nativeBuildInputs = (args.nativeBuildInputs or [ ]) ++ [
                 nodejs
                 makeWrapper
-                # DO WHAT YOU CAN TO AVOID USING THIS!  It is a massive crutch.
-                unsymlinkify
               ];
               # npm will ensure the final binaries are executable for you, though at a
               # weird moment: not when you build the original package, but when someone
