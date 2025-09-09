@@ -1,0 +1,7 @@
+{
+  "name": "workspaces-nodeps",
+  "workspaces": [
+    "aaa",
+    "bbb"
+  ]
+}

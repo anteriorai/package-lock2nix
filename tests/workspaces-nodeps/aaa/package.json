@@ -1,0 +1,12 @@
+{
+  "name": "@example/aaa",
+  "version": "0.0.0",
+  "type": "module",
+  "scripts": {
+    "build": "echo no build step",
+    "test": "node --test"
+  },
+  "exports": {
+    "./aaa": "./aaa.js"
+  }
+}
