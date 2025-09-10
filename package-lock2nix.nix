@@ -16,12 +16,10 @@
 
 # Parse a package.json and package-lock.json into a built derivation.  This
 # module parses the package-lock.json into an eval-time dependency tree to
-# download and install every dependency as individual nix derivations.  It links
-# them all together into one big final symlink forest, meaning anything that
-# uses this folder for its node_modules must run with NODE_PRESERVE_SYMLINKS=1,
-# or equivalent (e.g. tsconfig.json’s compilerOptions.preserveSymlinks=true).
-# It is npm workspace aware and does treeshaking of dependencies when building
-# individual packages for different workspaces.
+# download and install every dependency as individual nix derivations.  It
+# combines them all into one big final node_modules directory, similar to what
+# ‘npm ci’ would do.  It is npm workspace aware and does treeshaking of
+# dependencies when building individual packages for different workspaces.
 #
 # The API is not set in stone: this works for us, for now, it’s quite ad-hoc, we
 # hope to learn about a better API as usage continues.
@@ -69,50 +67,6 @@ let
   scope = lib.makeScope newScope (
     scopeSelf:
     let
-      # horrific script which should never be used: recursively replace every
-      # absolute symlink in this directory by a copy of its target.  Obviously
-      # _extremely_ dangerous, particularly in a devShell (which is why it’s not
-      # exposed in nativeBuildInputs).
-      unsymlinkify = writeShellApplication {
-        name = "unsymlinkify";
-        meta.description = "In given directory recursively replace each symlink with its target";
-        runtimeInputs = [ findutils ];
-        text =
-          let
-            replaceSymlink = writeShellScript "replace_symlink" ''
-              set -euo pipefail
-              target="$(readlink -f "$1")"
-              # Only interested in directories (we're hacking
-              # non-preserveSymlinks-conforming software)
-              if [[ -d "$target" ]]; then
-                rm -f "$1"
-                cp --no-preserve=ownership -r "$target" "$1"
-                # We _do_ want to preserve the executable bit
-                chmod -R u+w "$1"
-              elif [[ ! -f "$target" ]]; then
-                >&2 echo "No target file found at $target for link $1"
-                exit 1
-              fi
-            '';
-          in
-          # White-listed possible build directories just because of how dangerous
-          # this script is when accidentally run in the wrong location during dev
-          # or debugging.
-          ''
-            if [[ "$PWD" != /tmp/* && "$PWD" != /private/tmp/* && "$PWD" != /var/* && "$PWD" != /build/* && "$PWD" != /nix/var/nix/builds/* ]]; then
-              >&2 cat <<EOF
-            Dangerous script 'unsymlinkify' running in unexpected build directory
-            $PWD, refusing to continue.  Edit the whitelist in package-lock2nix
-            source to circumvent this.
-            EOF
-              exit 1
-            fi
-            find "$1" -mindepth 1 -maxdepth 1 -type l -lname '/*' -exec ${replaceSymlink} {} \;
-            me="''${BASH_SOURCE[0]}"
-            find "$1" -mindepth 1 -maxdepth 1 -type d -exec "$me" {} \;
-          '';
-      };
-
       # createDeepLinks SOURCE_ROOT TARGET_ROOT
       #
       # links :: [ { source : str; target : str; } ]
@@ -171,18 +125,39 @@ let
           ) files
         );
 
-      # Turn an attrset of derivations into a directory containing a symlink to
-      # each.  Also exposes an attribute in passthru, .mergeInto, which is a
-      # script to merge this final directory into an existing directory.  If any
-      # of the contents are themselves also mergeable, this is done recursively.
-      # “Merging” means that if the target doesn’t yet exist, a fresh symlink is
-      # created as usual, but if a directory with that name already exists the
-      # script will merge all its contents into that existing directory.
+      # This is a safe but painful default.  Node really hates symlinks and
+      # fights you every step of the way
+      # (e.g. "https://github.com/nodejs/node/issues/19383").  Having a plain
+      # node_modules directory with every dependency as real directories in
+      # there is much less susceptible to obscure bugs and edge cases.  The cost
+      # is copying of all these dependencies every time you build a new
+      # derivation, even if none of the dependencies changed: they must be
+      # copied into the final derivation rather than linked.  If this cost
+      # becomes too high, you can use ‘ln -s’ here, but there is a huge cost in
+      # complexity you’ll have to wrangle, including envvars
+      # NODE_PRESERVE_SYMLINKS and NODE_PRESERVE_SYMLINKS_MAIN.  In the git
+      # history of this project is a version which does this, including a tool
+      # ‘unsymlinkify’ to transform a hierarchy of symlinks to a plain hierarchy
+      # of files and directories at runtime.  Caveat emptor.
+      defaultCopyCommand = "cp -r";
+
+      # Turn an attrset of derivations into a directory containing their
+      # realized outputs.  Also exposes an attribute in passthru, .mergeInto,
+      # which is a script to merge this final directory into an existing
+      # directory.  If any of the contents are themselves also mergeable, this
+      # is done recursively.  “Merging” means that if the target doesn’t yet
+      # exist, the derivation is included as usual, but if a directory with that
+      # name already exists the script will merge all its contents into that
+      # existing directory.
       #
-      # This is useful for setting up an initial wireframe of a directory and
-      # then merging a different tree into it.  Think a node_modules with a few
-      # local symlinks, into which the remaining external third party
-      # dependencies are merged.
+      # By default derivations are copied over (see defaultCopyCommand), but
+      # derivations can change how they are included by exposing an attribute
+      # ‘copyCommand’.
+      #
+      # This builder is useful for setting up an initial wireframe of a
+      # directory and then merging a different tree into it.  Think a
+      # node_modules with a few local symlinks, into which the remaining
+      # external third party dependencies are merged.
       mkMergeable = lib.extendMkDerivation {
         constructDrv = stdenvNoCC.mkDerivation;
         excludeDrvArgNames = [
@@ -208,7 +183,7 @@ let
             ''
             + lib.concatLines (
               lib.mapAttrsToList (n: v: ''
-                ln -s ${v} $out/${lib.escapeShellArg n}
+                ${v.copyCommand or defaultCopyCommand} ${v} $out/${lib.escapeShellArg n}
               '') contents
             )
             + ''
@@ -236,7 +211,7 @@ let
                     # If this isn’t a merge-into script then just link it, no
                     # matter what.
                     + ''
-                      ln -s ${v} "$1/"${lib.escapeShellArg n}
+                      ${v.copyCommand or defaultCopyCommand} ${v} "$1/"${lib.escapeShellArg n}
                     ''
                     + lib.optionalString (isMergeable) ''
                       fi
@@ -336,6 +311,19 @@ let
                 scopeSelf.mkNpmModule {
                   src = root + ("/" + p.resolved);
                   npmOverrides = srcOverrides;
+                  # Local dependencies must be linked to prevent double
+                  # inclusion of a local dependency from separate packages.
+                  # E.g. for these local packages depending on each other:
+                  #
+                  # foo -> bar
+                  #   \      \
+                  #    \     v
+                  #     --> quux
+                  #
+                  # If dependencies are copied (or linked, but with
+                  # NODE_PRESERVE_SYMLINKS enabled), quux will be imported twice
+                  # as separate dependencies.  This is generally undesirable.
+                  copyCommand = "ln -s";
                 }
               else
                 mkNodeSingleDep {
@@ -389,81 +377,28 @@ let
                 contents = recursed;
                 name = "node-modules-batch";
                 nativeBuildInputs = [ jq ];
-                # makeRelativeWrapper is a horrible variant of makeWrapper
-                # (without any of the flags) which respects relative paths to
-                # the link, at invocation time.  The resulting binary acts like
-                # a symlink without actually being a symlink.  It doesn’t touch
-                # the working dir, it just finds the target script /relative/ to
-                # the wrapper script and execs into that.  You can’t do a simple
-                # ‘exec ../../my/target.sh’ because those ../.. are interpreted
-                # relative to the working directory of the caller, not the
-                # wrapper script.  And why not a normal symlink?  Because the
-                # node.js ecosystem is in a horrible state of symlink support:
-                # node has two flags, --preserve-symlinks and
-                # --preserve-symlinks-main: the former is for regular
-                # require/import calls in node.js code, the latter is an
-                # entirely separate flag to support preserving symlinks _of the
-                # entrypoint_.  That isn’t default because so many node.js
-                # packages actually _expect_ non-preservation of symlinks for
-                # their entrypoint, because they _expect_ to be symlinked from
-                # node_modules/.bin/foo-pkg -> node_modules/foo-pkg/main.js.  In
-                # main.js they’ll do things like ‘require("./utils.js")’ which
-                # would fail if you actually preserved symlinks (there is no
-                # node_modules/.bin/utils.js).  Even npm and npx themselves
-                # break if you set that flag to true, so you really can’t do it
-                # at derivation level.
-                #
-                # This is all compounded by the obsolesence of NODE_PATH:
-                # node.js really only works reliably if all dependencies are in
-                # <rootDir>/node_modules/*.  If you take the “default” route:
-                #
-                #   - node_modules/.bin/foo-pkg is a symlink -> ../foo-pkg/main.js
-                #   - node_modules/foo-pkg is itself a symlink -> /nix/store/...-foo-pkg/
-                #   - NODE_PRESERVE_SYMLINKS=1
-                #   - NODE_PRESERVE_SYMLINKS_MAIN is unset
-                #
-                # then foo-pkg/main.js will be found, but will be called as
-                # /nix/store/...-foo-pkg/main.js, so it won’t find any sister
-                # dependencies which it declared it needed.  There is only one
-                # reliable way to handle dependencies, it’s not NODE_PATH: when
-                # you call foo-pkg/main.js, node /must/ call it as
-                # <rootDir>/node_modules/foo-pkg/main.js, aka: all symlinks in
-                # the entire chain must be preserved.  That means you must
-                # enable NODE_PRESERVE_SYMLINKS and NODE_PRESERVE_SYMLINKS_MAIN,
-                # but node.js must be aware (somehow) that the entrypoint script
-                # is called from <rootDir>/node_modules/foo-pkg/main.js instead
-                # of <rootDir>/node_modules/.bin/foo-pkg: that is achieved by
-                # this insane wrapper.
-                #
-                # - https://github.com/nodejs/node/issues/19383
-                #
-                # 😰
                 postInstall = ''
-
-                  makeRelativeWrapper() {
-                    set -eu
-                    >"$2" cat <<EOF
-                  #!$shell
-                  set -eu
-                  export NODE_PRESERVE_SYMLINKS_MAIN=1
-                  d="\$(dirname "\''${BASH_SOURCE[0]}")"
-                  exec "\$d/$1" "\$@"
-                  EOF
-                    chmod +x "$2"
-                  }
                   (
                     cd $out
                     set -eu
                     shopt -s nullglob
                     for d in */ @*/*/ ; do
-                      if [[ -f "$d"package.json ]]; then
-                        <"$d/package.json" jq -r '.name as $name | (.bin // empty) | if type == "object" then . else {"\($name)": .} end| to_entries | .[]| [.key, .value] | @tsv' | while read -r binname path; do
+                      pjson="$d"package.json
+                      if [[ -f "$pjson" ]]; then
+                        <"$pjson" jq -r '.name as $name | (.bin // empty) | if type == "object" then . else {"\($name)": .} end| to_entries | .[]| [.key, .value] | @tsv' | while read -r binname path; do
                           mkdir -p .bin
                           (
                             cd .bin
-                            target="../''${d}$path"
+                            target="../$d""$path"
                             src="''${binname##*/}"
-                            makeRelativeWrapper "$target" "$src"
+                            # As far as I can tell npm behavior is to blindly
+                            # override binaries with conflicting binary names.
+                            # At least warn the user in case they need to debug
+                            # this.  God be with ye.
+                            if [[ -f "$src" ]]; then
+                              >&2 echo "Overwriting existing .bin/$src from $(readlink "$src") to $target"
+                            fi
+                            ln -s -f "$target" "$src"
                           )
                         done
                       fi
@@ -902,10 +837,7 @@ let
               nativeBuildInputs = (args.nativeBuildInputs or [ ]) ++ [
                 nodejs
                 makeWrapper
-                # DO WHAT YOU CAN TO AVOID USING THIS!  It is a massive crutch.
-                unsymlinkify
               ];
-              NODE_PRESERVE_SYMLINKS = 1;
               # npm will ensure the final binaries are executable for you, though at a
               # weird moment: not when you build the original package, but when someone
               # ultimately installs it.  That causes these files to get symlinked into
@@ -956,38 +888,9 @@ let
 
               fixupNpmBinaries =
                 let
-                  # Reverse hack: _if_ your package depends on npm and/or npx at
-                  # runtime (some packages do this e.g. for version checks) then it
-                  # would break from within a package-lock2nix built derivation,
-                  # because npm and npx are not compatible with
-                  # NODE_PRESERVE_SYMLINKS_MAIN=1.  This pass detects whether there
-                  # is a nodejs derivation in your buildinputs, and before putting
-                  # it on the baked PATH of any dependent binary it inserts a
-                  # wrapped version of npm and npx which does nothing but disable
-                  # that envvar.
-                  symlinkSafeNpmNpx =
-                    nodejs:
-                    stdenvNoCC.mkDerivation {
-                      inherit (nodejs) version;
-                      pname = "npm-npx";
-                      dontUnpack = true;
-                      nativeBuildInputs = [ makeWrapper ];
-                      installPhase = ''
-                        mkdir -p $out/bin
-                        cd "${lib.getBin nodejs}/bin"
-                        for f in npm npx; do
-                          makeWrapper "${lib.getBin nodejs}/bin/$f" "$out/bin/$f" \
-                            --unset NODE_PRESERVE_SYMLINKS_MAIN
-                        done
-                      '';
-                    };
-                  isNodeJs = drv: (drv.pname or "") == "nodejs";
-                  buildInputs' = lib.concatMap (
-                    drv: lib.optionals (isNodeJs drv) [ (symlinkSafeNpmNpx drv) ] ++ [ drv ]
-                  ) (self.buildInputs or [ ]);
                   PATH = lib.concatStringsSep ":" ([
                     "$out/node_modules/.bin"
-                    (lib.makeBinPath buildInputs')
+                    (lib.makeBinPath (self.buildInputs or [ ]))
                   ]);
                   script = lib.concatStringsSep "\n" (
                     lib.mapAttrsToList (
@@ -1002,8 +905,7 @@ let
                           chmod +x $out/${val'}
                           patchShebangs $out/${val'}
                           makeWrapper $out/${val'} $out/bin/${name'} \
-                            --prefix PATH : ${PATH} \
-                            --set-default NODE_PRESERVE_SYMLINKS 1
+                            --prefix PATH : ${PATH}
                         fi
                       ''
                     ) self.passthru.outBins
