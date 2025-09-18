@@ -1,0 +1,11 @@
+{
+  "name": "overrides",
+  "version": "1.2.3",
+  "scripts": {
+    "build": "echo ok",
+    "test": "node --test '**/*.test.js'"
+  },
+  "dependencies": {
+    "bencode": "^4.0.0"
+  }
+}
