@@ -8,5 +8,6 @@ package-lock2nix.mkNpmModule {
         echo 'export default { decode: () => "foo" }' > index.js
       '';
     };
+    "non/existent" = throw "unused overrides should not be accessed";
   };
 }
