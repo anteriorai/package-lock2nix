@@ -71,6 +71,7 @@
                   slashflat = flatten (lib.concatStringsSep "/") notDeriv nested;
                 in
                 slashflat;
+              devShells.default = pkgs.mkShell { packages = [ pkgs.nodejs ]; };
             };
         };
     in
