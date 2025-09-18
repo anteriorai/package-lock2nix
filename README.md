@@ -4,7 +4,21 @@ This is Anterior’s build system for projects based on package-lock.json.  Unli
 
 The big win: **no separate Nix codegen step.** When you update your package-lock.json, changes are automatically picked up.
 
-## No warranty. Really, seriously!
+## Features
+
+- workspaces
+- local linked projects (`file:...`)
+- overrides
+- no hard-coded hashes (no `vendorHash`)
+- full nix eval; no npm install
+- every dependency independently cached
+- same final on-disk node_modules lay-out as npm
+
+## API
+
+There is no official API documentation but there are examples and regression tests in [`tests`](tests).
+
+## No warranty.  Seriously.
 
 This project is _actually_ provided as-is: the license text truly applies.  We release this source code in the hopes that it will be useful to anyone, but we reserve the right to:
 
