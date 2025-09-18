@@ -18,6 +18,16 @@ The big win: **no separate Nix codegen step.** When you update your package-lock
 
 There is no official API documentation but there are examples and regression tests in [`tests`](tests).
 
+## Copyright & License
+
+package-lock2nix is authored by [Anterior](https://anterior.com), based in NYC, USA.
+
+**We’re hiring!**  If you got this far, e-mail us at hiring+oss@anterior.com and mention package-lock2nix.
+
+The code is available under the AGPLv3 license (not later).
+
+See the [LICENSE](LICENSE) file.
+
 ## No warranty.  Seriously.
 
 This project is _actually_ provided as-is: the license text truly applies.  We release this source code in the hopes that it will be useful to anyone, but we reserve the right to:
