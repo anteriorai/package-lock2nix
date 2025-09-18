@@ -306,15 +306,16 @@ let
         }:
         assert lib.assertMsg (packages != { }) "Cannot make node_modules for empty packages";
         let
+          # Fixup the hierarchy in a dependency was overridden with a derivation
+          # without a hierarchy attribute.  Technically we could just recompute
+          # the hierarchy like this for every dependency and not bother trying
+          # to save it between the upstack definition and this layer,
+          # but.. performance?  Does it matter?
+          getHierarchy = p: d: d.hierarchy or (lib.splitString "/" p);
           sourcesFlatRaw = builtins.mapAttrs (
             name: p:
             let
-              # Fixup the hierarchy in a dependency was overridden with a
-              # derivation without a hierarchy attribute.  Technically we could
-              # just recompute the hierarchy like this for every dependency and
-              # not bother trying to save it between the upstack definition and
-              # this layer, but.. performance?  Does it matter?
-              hierarchy = p.hierarchy or (lib.splitString "/" name);
+              hierarchy = getHierarchy name p;
             in
             if (p.link or false) then
               scopeSelf.mkNpmModule {
@@ -361,7 +362,9 @@ let
           # unknown items on the prev.
           sourcesFlat = builtins.intersectAttrs sourcesFlatRaw sourcesFlat';
           sources = lib.foldl' lib.recursiveUpdate { } (
-            lib.mapAttrsToList (path: deriv: lib.setAttrByPath deriv.hierarchy { "." = deriv; }) sourcesFlat
+            lib.mapAttrsToList (
+              path: deriv: lib.setAttrByPath (getHierarchy path deriv) { "." = deriv; }
+            ) sourcesFlat
           );
           walkSources =
             a:

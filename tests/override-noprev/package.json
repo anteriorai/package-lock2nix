@@ -1,0 +1,12 @@
+{
+  "name": "override-noprev",
+  "version": "3.2.1",
+  "scripts": {
+    "build": "echo ok",
+    "test": "echo ok"
+  },
+  "dependencies": {
+    "@anterior/brrr": "^0.1.204",
+    "bencode": "^4.0.0"
+  }
+}
