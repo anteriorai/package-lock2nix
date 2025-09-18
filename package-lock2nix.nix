@@ -240,6 +240,7 @@ let
           name,
           src,
           version,
+          passthru ? { },
         }:
         stdenv.mkDerivation (self: {
           inherit name src version;
@@ -277,6 +278,7 @@ let
             done
           '';
           preFixupPhases = [ "forcePermissionsPhase" ];
+          inherit passthru;
         })
       );
 
@@ -306,40 +308,43 @@ let
         let
           sourcesFlatRaw = builtins.mapAttrs (
             name: p:
-            (
-              if (p.link or false) then
-                scopeSelf.mkNpmModule {
-                  src = root + ("/" + p.resolved);
-                  npmOverrides = srcOverrides;
-                  # Local dependencies must be linked to prevent double
-                  # inclusion of a local dependency from separate packages.
-                  # E.g. for these local packages depending on each other:
-                  #
-                  # foo -> bar
-                  #   \      \
-                  #    \     v
-                  #     --> quux
-                  #
-                  # If dependencies are copied (or linked, but with
-                  # NODE_PRESERVE_SYMLINKS enabled), quux will be imported twice
-                  # as separate dependencies.  This is generally undesirable.
-                  copyCommand = "ln -s";
-                }
-              else
-                mkNodeSingleDep {
-                  src = fetchurl {
-                    url = p.resolved;
-                    hash = p.integrity;
-                  };
-                  name = lib.last p.hierarchy;
-                  inherit (p) version;
-                }
-            ).overrideAttrs
-              (old: {
-                passthru = old.passthru or { } // {
-                  inherit (p) hierarchy;
+            let
+              # Fixup the hierarchy in a dependency was overridden with a
+              # derivation without a hierarchy attribute.  Technically we could
+              # just recompute the hierarchy like this for every dependency and
+              # not bother trying to save it between the upstack definition and
+              # this layer, but.. performance?  Does it matter?
+              hierarchy = p.hierarchy or (lib.splitString "/" name);
+            in
+            if (p.link or false) then
+              scopeSelf.mkNpmModule {
+                src = root + ("/" + p.resolved);
+                npmOverrides = srcOverrides;
+                # Local dependencies must be linked to prevent double
+                # inclusion of a local dependency from separate packages.
+                # E.g. for these local packages depending on each other:
+                #
+                # foo -> bar
+                #   \      \
+                #    \     v
+                #     --> quux
+                #
+                # If dependencies are copied (or linked, but with
+                # NODE_PRESERVE_SYMLINKS enabled), quux will be imported twice
+                # as separate dependencies.  This is generally undesirable.
+                copyCommand = "ln -s";
+                passthru.hierarchy = hierarchy;
+              }
+            else
+              mkNodeSingleDep {
+                src = fetchurl {
+                  url = p.resolved;
+                  hash = p.integrity;
                 };
-              })
+                name = lib.last hierarchy;
+                inherit (p) version;
+                passthru.hierarchy = hierarchy;
+              }
           ) packages;
           # Apply the override fixpoint on the _flat_ source list, not the exploded &
           # merged source tree.  This means an override for a top-level package and
@@ -545,9 +550,7 @@ let
           # it.
           inherit (packageLock) name;
           inherit root srcOverrides;
-          packages = builtins.mapAttrs (
-            path: lib.mergeAttrs { hierarchy = lib.splitString "/" path; }
-          ) filtered;
+          packages = filtered;
         }
       );
 
