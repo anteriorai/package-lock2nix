@@ -849,7 +849,7 @@ let
               buildPhase = ''
                 runHook preBuild
 
-                npm run build
+                npm run --if-present build
 
                 runHook postBuild
               '';
@@ -859,7 +859,7 @@ let
               checkPhase = ''
                 runHook preCheck
 
-                npm run $npmCheckTarget
+                npm run --if-present $npmCheckTarget
 
                 runHook postCheck
               '';
@@ -1021,7 +1021,7 @@ let
 
               for w in ${lib.escapeShellArgs nodeModules.includedWorkspaces}; do
                 echo "npm build workspace $w"
-                npm run --workspace "$w" build
+                npm run --if-present --workspace "$w" build
               done
 
               runHook postBuild
@@ -1031,7 +1031,7 @@ let
 
               for w in ${lib.escapeShellArgs nodeModules.includedWorkspaces}; do
                 echo "npm check workspace $w"
-                npm run --workspace "$w" $npmCheckTarget
+                npm run --if-present --workspace "$w" $npmCheckTarget
               done
 
               runHook postCheck
