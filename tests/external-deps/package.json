@@ -2,7 +2,6 @@
   "name": "external-deps",
   "type": "module",
   "scripts": {
-    "build": "echo nothing to build",
     "test": "node --test"
   },
   "dependencies": {

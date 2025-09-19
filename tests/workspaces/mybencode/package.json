@@ -2,10 +2,6 @@
   "name": "@example/mybencode",
   "version": "0.0.0",
   "type": "module",
-  "scripts": {
-    "build": "echo no build step",
-    "test": "echo no tests"
-  },
   "exports": {
     ".": "./index.js"
   },

@@ -1,10 +1,6 @@
 {
   "name": "local-dep-only",
   "type": "module",
-  "scripts": {
-    "build": "echo nothing to build",
-    "test": "echo nothing to test"
-  },
   "dependencies": {
     "single-no-deps": "file:../single-no-deps"
   },
